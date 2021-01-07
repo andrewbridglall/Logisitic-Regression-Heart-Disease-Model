@@ -1,0 +1,262 @@
+---
+title: "Logistic Regression Heart Disease Model"
+author: "Brendan Tong, Andrew Bridglall, Darren Jian, and Youngjun Oh"
+output: html_document
+---
+
+# Abstract
+
+We wanted to build a logistic regression model to accurately predict heart disease in patients based on data from the Cleveland Clinic Foundation. To do this, we have performed logistic regressions where we first considered multiple potential predictor variables and distilled them into the “best” set of predictors through a model-selection process. In the revised logistic regression, we have only considered the following predictor variables: cp (chest pain), sex, trestbps (resting blood pressure), slope (the slope of the peak exercise ST segment), ca (the number of major blood vessels (0-3) colored by fluoroscopy), thal (thallium stress test result).
+
+Our results indicated that both our original and revised logistic regression models failed the Hosmer-Lemeshow goodness of fit test, suggesting that the models did not sufficiently fit the data. After comparing the deviance residual outputs for both models, we found that the second model’s deviance residuals median was closer to 0 and the minimum and maximum values were more symmetric than those of the first model. Next, we observed that the misclassification error rate for our second model (14.3%) was less than the error rate for our first model (16.1%), which would have indicated accuracy if not for the lack of good fit. Ultimately, while our revised model has reasonable predictive power (>85% prediction accuracy), we must take our models’ reliability and predictions with a grain of salt.
+
+We then put forth a variety of suggestions that may have increased the reliability of our logistic models. First, we believe that having a larger dataset on heart disease, as well as including more variables that were directly linked to heart disease (ie, patient smoking history, obesity and diabetes) would have been more beneficial to building accurate logistic models. Regarding rooms for improvement, we have noticed that partitioning our dataset resulted in the sample size of the testing data being much smaller than the sample size of the training data; this might explain the higher error rates in the testing data compared to the training data. In addition, adjusting the heart disease prediction threshold (50%) may have also resulted in more accurate predictions. Implementing improvements may increase the predictive power of future models on heart disease.
+
+```{r, echo=FALSE}
+
+library(ResourceSelection)
+
+library(tidyverse)
+url <- "https://archive.ics.uci.edu/ml/machine-learning-databases/heart-disease/processed.cleveland.data"
+data <- read.csv(url, header=FALSE)
+
+head(data) # you see data, but no column names
+ 
+colnames(data) <- c(
+  "age",
+  "sex",# 0 = female, 1 = male
+  "cp", # chest pain
+  # 1 = typical angina,
+  # 2 = atypical angina,
+  # 3 = non-anginal pain,
+  # 4 = asymptomatic
+  "trestbps", # resting blood pressure (in mm Hg)
+  "chol", # serum cholestoral in mg/dl
+  "fbs",  # fasting blood sugar if less than 120 mg/dl, 1 = TRUE, 0 = FALSE
+  "restecg", # resting electrocardiographic results
+  # 1 = normal
+  # 2 = having ST-T wave abnormality
+  # 3 = showing probable or definite left ventricular hypertrophy
+  "thalach", # maximum heart rate achieved
+  "exang",   # exercise induced angina, 1 = yes, 0 = no
+  "oldpeak", # ST depression induced by exercise relative to rest
+  "slope", # the slope of the peak exercise ST segment
+  # 1 = upsloping
+  # 2 = flat
+  # 3 = downsloping
+  "ca", # number of major vessels (0-3) colored by fluoroscopy
+  "thal", # this is short of thalium heart scan
+  # 3 = normal (no cold spots)
+  # 6 = fixed defect (cold spots during rest and exercise)
+  # 7 = reversible defect (when cold spots only appear during exercise)
+  "hd" # (the predicted attribute) - diagnosis of heart disease
+  # 0 if less than or equal to 50% diameter narrowing
+  # 1 if greater than 50% diameter narrowing
+)
+ 
+head(data) # now we have data and column names
+ 
+str(data) # this shows that we need to tell R which columns contain factors
+# it also shows us that there are some missing values. There are "?"s
+# in the dataset. These are in the "ca" and "thal" columns...
+ 
+## First, convert "?"s to NAs...
+data[data == "?"] <- NA
+ 
+## Now add factors for variables that are factors and clean up the factors
+## that had missing data...
+data[data$sex == 0,]$sex <- "F"
+data[data$sex == 1,]$sex <- "M"
+data$sex <- as.factor(data$sex)
+ 
+data$cp <- as.factor(data$cp)
+data$fbs <- as.factor(data$fbs)
+data$restecg <- as.factor(data$restecg)
+data$exang <- as.factor(data$exang)
+data$slope <- as.factor(data$slope)
+ 
+data$ca <- as.integer(data$ca) # since this column had "?"s in it
+# R thinks that the levels for the factor are strings, but
+# we know they are integers, so first convert the strings to integiers...
+data$ca <- as.factor(data$ca)  # ...then convert the integers to factor levels
+ 
+data$thal <- as.integer(data$thal) # "thal" also had "?"s in it.
+data$thal <- as.factor(data$thal)
+ 
+## This next line replaces 0 and 1 with "Healthy" and "Unhealthy"
+data$hd <- ifelse(test=data$hd == 0, yes="Healthy", no="Unhealthy")
+data$hd <- as.factor(data$hd) # Now convert to a factor
+ 
+str(data) ## this shows that the correct columns are factors
+
+nrow(data[is.na(data$ca) | is.na(data$thal),])
+data[is.na(data$ca) | is.na(data$thal),]
+nrow(data)
+data <- data[!(is.na(data$ca) | is.na(data$thal)),]
+nrow(data)
+
+```
+
+
+
+
+# Introduction 
+
+The objective of this project is to build a logistic regression model to accurately predict heart disease in patients given a wide set of variables (chest pain, sex, cholesterol levels, resting ECG results, etc). To build our model, we used data from the [Heart Disease](http://archive.ics.uci.edu/ml/datasets/Heart+Disease) dataset taken from the UC Irvine Machine Learning Repository. Our null and alternative hypotheses for the logistic regression are:
+
+Null Hypothesis: There is no relationship between the predictor variables and the response. 
+
+Alternate Hypothesis: There exists a relationship between the predictor variables and the response. 
+
+In our research, we built two logistic regression models and compared each model's reliability and predictive power. The first model used all predictor variables, and the second model was refined using the first model’s results to only use predictor variables that were statistically significant at a 5% level. Then, we used Hosmer-Lemeshow’s goodness of fit test to test our null hypothesis. We expected the testing data results to closely mirror that of the training data, and further expected the second model to have more accurate predictions compared to the first model. Thus, we hypothesized that we would fail to reject the null hypothesis. Ultimately, we found that the refined logistic model yielded more accurate results compared to the all-inclusive model. 
+
+We consolidated the questions of interests we hoped to answer into the following:
+
+1. What was the reliability of using predictor variables such as cp (chest pain), sex, trestbps (resting blood pressure, slope (the slope of the peak exercise  ST segment), ca (the number of major blood vessels (0-3) colored by fluoroscopy), thal (thallium stress test result) from our heart disease dataset to predict status of heart disease using the logistic regression model?
+
+2. How accurate are our models at predicting heart disease using the training data versus the testing data? We evaluate predictive power using misclassification error rates on confusion matrices.
+
+3. Do our logistic regression models sufficiently fit our data? We evaluate this using the Hosmer-Lemeshow goodness of fit test.
+
+
+# Methods
+
+Our method focuses on producing logistic regressions that best predict heart disease using various predictor variables. We started by fixing our dataset into a suitable format for our logistic regressions such as re-labeling columns and factors (i.e. labeling the numeric response variable hd (heart disease from 0 as healthy and 1 as unhealthy) and partitioning our data into two sets for training (80%) and testing (20%).  To test our model assumptions, we have utilized the xtabs() function command to build tables to test that both healthy and unhealthy patients from the hd variable are represented by different variables. For example, xtabs(~ hd + sex, data=data) command was used to determine whether both healthy and unhealthy patients are represented by both female and male samples. We then repeated this process for all categorical variables we were using to predict heart disease. Moreover, the deviance residual values from the summary function of the regressions indicate valid assumptions for both models. For example, the minimum and maximum values for the deviance residual is almost symmetric for the first model with values of -3.0490 and 2.9086, respectively, along with a median value of 0.1213 that is close to 0. Similarly, the minimum and maximum values for the deviance residual of the second regression are -2.9626 and 2.9125 with a median value of -0.1170, which is also close to 0.
+ 
+While we have considered using a simple logistic regression model with one predictor variable, the statistically insignificant results from anticipated variables such as chol (cholesterol level) and age have geared us to consider multiple potential predictor variables. Thus, we first considered multiple potential predictor variables by predicting hd (heart disease) using all variables using the mylogit <- glm(hd ~ ., data = data, family = "binomial") command. Then, after the detailed model-selection process to select the best set of predictors that are statistically significant (with a p-value less than 0.05 at a 5% significance level), we have performed a revised logistic regression that only contains the cp (chest pain), sex, trestbps (resting blood pressure), slope (the slope of the peak exercise ST segment), ca (the number of major blood vessels (0-3) colored by fluoroscopy), thal (thallium stress test result) as predictor variables. The command follows: mylogit_revised <- glm(hd ~ cp + sex + trestbps + slope + ca + thal, data = data, family = "binomial"). In addition, for our predicting variable heart disease, we chose 0.5 level as a threshold and thus only consider hd values greater and equal to 0.5 as having heart disease. 
+ 
+For our main hypothesis test, we have implemented the Hosmer-Lemeshow Goodness of Fit Test using the hoslem.test command. We have considered the resulting p-value from this test to assess whether we fail to reject the test’s null hypothesis that our logistic regression shows good fit our data. Thus, failing to reject the null hypothesis with a p-value greater than 0.05 at a 5% significance level indicates a strong fit of our model to the data.
+ 
+Lastly, the graph from the ggplot illustrates the predicted probabilities of a patient having heart disease with his or her actual disease status. The cluster of green dots on the top right corner of the graph illustrates that most patients with heart disease have a high predicted probability of having heart disease. In contrast, the dots in orange demonstrate that most patients without heart disease have a low predicted probability of having heart disease.
+
+
+# First Logistic Regression Model
+
+```{r, echo=FALSE}
+#test model assumptions
+
+#two way table of factor variables
+#check if there are any combinations == 0
+xtabs(~ hd + sex, data=data)
+xtabs(~ hd + cp, data=data)
+xtabs(~ hd + fbs, data=data)
+xtabs(~ hd + restecg, data=data)
+xtabs(~ hd + exang, data=data)
+xtabs(~ hd + slope, data=data)
+xtabs(~ hd + ca, data=data)
+xtabs(~ hd + thal, data=data)
+
+#partition data into training (80%) and test (20%)
+set.seed(123)
+ind <- sample(2, nrow(data), replace=T, prob=c(0.8,0.2))
+training <- data[ind==1,]
+testing <- data[ind==2,]
+
+#logistic model regression
+mylogit <- glm(hd ~ ., data = data, family = "binomial")
+summary(mylogit)
+# Deviance Residuals: 
+#     Min       1Q   Median       3Q      Max  
+# -3.0490  -0.4847  -0.1213   0.3039   2.9086 
+
+hoslem.test(training$hd,
+            predict.glm(mylogit, training, type="response"),
+            5)
+#X-squared = 241, df = 3, p-value < 2.2e-16
+
+#prediction 1 & misclassification error - training data
+p1 <- predict(mylogit, training, type='response')
+pred1 <- ifelse(p1>0.5,1,0)
+tab1 <- table(Predicted=pred1, Actual=training$hd)
+tab1
+1-sum(diag(tab1))/sum(tab1) # misclassification error = 0.1244813
+
+#prediction 2 & misclassification error - testing data
+p2 <- predict(mylogit, testing, type='response')
+pred2 <- ifelse(p2>0.5,1,0)
+tab2 <- table(Predicted=pred2, Actual=testing$hd)
+tab2
+1-sum(diag(tab2))/sum(tab2) # misclassification error = 0.1607143
+
+#figure out type 1 and type 2 errors from tables
+power.t.test(65, delta = 1, sd = , power = NULL, type = "two.sample", alternative = "one.sided")
+
+```
+
+# Revised Logistic Regression Model
+
+```{r, echo=FALSE}
+
+mylogit_revised <- glm(hd ~ cp + sex + trestbps + slope + ca + thal, data = data, family = "binomial")
+summary(mylogit_revised)
+# Deviance Residuals: 
+#     Min       1Q   Median       3Q      Max  
+# -2.9626  -0.4746  -0.1170   0.3944   2.9125
+
+hoslem.test(training$hd,
+            predict.glm(mylogit_revised, training, type="response"),
+            5)
+#X-squared = 241, df = 3, p-value < 2.2e-16
+
+#prediction 1 & misclassification error - training data
+p1_revised <- predict(mylogit_revised, training, type='response')
+pred1_revised <- ifelse(p1_revised>0.5,1,0)
+tab1_revised <- table(Predicted=pred1_revised, Actual=training$hd)
+tab1_revised
+1-sum(diag(tab1_revised))/sum(tab1_revised) # misclassifcation error = 0.1244813
+
+#prediction 2 & misclassification error - testing data
+p2_revised <- predict(mylogit_revised, testing, type='response')
+pred2_revised <- ifelse(p2_revised>0.5,1,0)
+tab2_revised <- table(Predicted=pred2_revised, Actual=testing$hd)
+tab2_revised
+1-sum(diag(tab2_revised))/sum(tab2_revised) # misclassifcation error = 0.1428571
+
+#plot
+predicted.data <- data.frame(
+  probability.of.hd=mylogit_revised$fitted.values,
+  hd=data$hd)
+ 
+predicted.data <- predicted.data[
+  order(predicted.data$probability.of.hd, decreasing=FALSE),]
+predicted.data$rank <- 1:nrow(predicted.data)
+ 
+## Lastly, we can plot the predicted probabilities for each sample having
+## heart disease and color by whether or not they actually had heart disease
+ggplot(data=predicted.data, aes(x=rank, y=probability.of.hd)) +
+  geom_point(aes(color=hd), alpha=1, shape=1, stroke=2) +
+  xlab("Index") +
+  ylab("Predicted probability of getting heart disease")
+```
+
+# Results
+
+As stated, our data was partitioned so that 80% was used for training and 20% was used for testing. We built two logistic regression models, the first using all predictor variables, and the second using the following statistically significant variables: chest pain, sex, resting blood pressure, slope of the peak exercise ST segment, the number of major blood vessels colored by fluoroscopy, and thallium stress test result.
+
+When we ran a logistic regression on the data using all predictor variables, we found that the minimum value for the deviance residual was -3.0490, the median value was -0.1213, and the maximum value was 2.9086, which indicates symmetry. Performing a Hosmer-Lemeshow goodness of fit test, we observed a large chi-squared statistic of 241 and a p-value smaller than 2.2e-16, which indicated evidence of poor fit. Calculating the first model’s rate of misclassification, we received relatively low values, with 12.4% error using the training data and 16.1% error using the testing data.
+
+Running our second logistic regression using only the statistically significant variables, we found similar deviance residual values that suggested symmetry: a minimum value of -2.9626, a median value of -0.1170, and a maximum value of 2.9125. The Hosmer-Lemeshow goodness of fit test returned the same results, with the chi-squared statistic equal to 241 and the p-value smaller than 2.2e-16, which once again indicated the model was a poor fit. The second model’s rate of misclassification was identical to the first model’s when it came to the training data (12.4%), and nearly 2% lower than the first model’s for the testing data (14.3%).
+
+# Conclusion
+
+The goal of this project was to build a logistic regression model to accurately predict heart disease given a set of variables that included predictors like chest pain, sex, cholesterol levels, and resting ECG results. Our heart disease dataset had both categorical/binary and numerical variables, including a variable we aimed to use as our response (heart disease). Hence, we thought it was a dataset of sufficient quality to use for our project. 
+
+To test our logistic model assumptions, we constructed contingency tables for all of our categorical variables. Since no combination of variable conditions with heart disease had 0 data points, we were justified to proceed with our logistic regression. We did not conduct tests for linear regression model assumptions, since logistic regressions are non-linear. We partitioned our data randomly into 80% training data and 20% testing data.
+
+We then built our first logistic regression model using all 13 predictor variables and the training data. Then, we analyzed the summary of our model. The deviance residuals median was approximately centered at 0 and min and max values were relatively symmetric about 0. This indicated that our model was not biased in one direction. Next, we evaluated the significance levels of the coefficients. We observed that six of the 13 predictor variables used had p-values less than 0.05. These variables were: sex, cp (chest pain), trestbps (resting blood pressure), slope (peak exercise ST segment), ca (number of major blood vessels colored by fluoroscopy), and thal (thalium heart scan results).
+
+Our second logistic regression used the six predictor variables that were significant. We then analyzed the summary of our revised model. The new deviance residuals median was closer to 0 than the previous model and the min and max values were also more symmetric compared to the previous model.
+
+Next, we compared the predictions made with the training and testing data across the two models. We first saw that the misclassification error rates for predicting heart disease using training data were the same (12.4%) for both models. However, using testing data, the misclassification error rate for our revised model (14.3%) was lower than the error rate for our first model (16.1%). Our revised model thus appeared to perform better.
+
+After performing the Hosmer-Lemeshow goodness of fit test on both models, we got equivalent outputs (X-squared = 241, df = 3, p-value < 2.2e-16).  The p-values were highly significant, indicating poor fit. These test outputs were unexpected, especially since the p-value < 2.2e-16 was so highly significant. Because both the original and revised models failed the goodness of fit test, we must take our models’ reliability and predictions with a grain of salt. Failure of the Hosmer-Lemeshow test was further surprising considering that our revised model did have good predictive power given by our misclassification error rates (>85% prediction accuracy). 
+
+It should be noted, however, that while our revised model did have a smaller misclassification error rate than our original model, it was only by around 2%. Thus, our second model may have only been marginally better than the first. In this case, we should not fully accept the predictive power of either model.
+
+When we graph the predicted probabilities of the revised logistic regression model, we see that “unhealthy” patients (with heart disease) are shown to have a higher predicted probability of having heart disease; likewise, “healthy” patients (without heart disease) have a lower predicted probability of having heart disease. This would indicate that our model is somewhat accurate, even though it has poor fit.
+
+To understand why we arrived at a less than ideal logistic model, we evaluated potential shortcomings not only in our heart disease data but also in our methodology. Regarding our dataset, we observed that some data points seemed too unlikely. For instance, being asymptomatic for chest pain was highly significant as a predictor for heart disease. This was confusing, because it would perhaps be more likely that high levels of chest pain, not asymptomatic chest pain, were more correlated with heart disease. Examples like these made us question at times if our data was indeed accurate.  Some improvements that may make our heart disease data more accurate would be to first increase the size of the dataset. This data contained only 297 observations from one hospital (Cleveland Clinic Foundation). However, if heart disease data was accumulated from many different hospitals, there may be more data points with which to build more accurate models. Next, perhaps the data could include different variables that are more directly correlated with heart disease, such as a history of smoking, diabetes and obesity (CDC).
+
+Regarding our own regression approach, we partitioned the heart disease data into 80% training data and 20% testing data. Because the sample size of the testing data was considerably smaller than that of the training data, this may explain why misclassification error rates in the testing data were higher than those in the training data across both models. Moreover, it is possible that we incorrectly chose the best predictor variables for our logistic models. We would argue that this is not likely because we first built a model with all variables, then refined the model given the predictors with the highest significance. Yet, both models had the same Hosmer-Lemeshow goodness of fit output (which showed poor goodness of fit). We could also have tried modifying our threshold (0.5) for heart disease predictions; perhaps results may have been different if we used a higher threshold for predicting heart disease such as 0.6 or 0.7.
+
+In conclusion, we recognize that our logistic regressions were both flawed models for predicting heart disease. Our second model had satisfactory predictive power (>85%); however, both models failed the Hosmer-Lemeshow goodness of fit test. Thus, we must take any predictions made with a grain of salt. Finally, we have put forth both immediate and long-term improvements that can be made to strengthen the accuracy of our models. Some of these suggestions included collecting more data on patient smoking history, obesity and diabetes, while also utilizing different predictor variables for future models.
